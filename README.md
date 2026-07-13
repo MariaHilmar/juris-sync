@@ -206,4 +206,4 @@ juris-sync/
 
 ## Licença
 
-MIT — uso livre para portfólio e estudo.
+Este projeto está licenciado sob a Licença MIT — veja o arquivo [LICENSE](LICENSE) para detalhes.
