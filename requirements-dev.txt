@@ -2,6 +2,18 @@
 pytest>=8.1.0
 pytest-asyncio>=0.23.5
 pytest-cov>=4.1.0
+pytest-watch>=4.2.0
 factory-boy>=3.3.0
 black>=24.2.0
 ruff>=0.3.0
+mypy>=1.11.0
+
+# Mock de API externa (contrato HTTP do DataJud)
+respx>=0.21.1
+
+# Testes de integração com PostgreSQL real via Docker
+testcontainers[postgres]>=4.9.0
+psycopg2-binary>=2.9.9
+
+# Contract testing do schema OpenAPI
+schemathesis>=3.35.0

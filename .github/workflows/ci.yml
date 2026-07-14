@@ -35,6 +35,9 @@ jobs:
       - name: Black
         run: black --check app tests
 
+      - name: Mypy
+        run: mypy app
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -56,3 +59,28 @@ jobs:
 
       - name: Pytest
         run: python -m pytest
+
+  integration:
+    name: Integration & Contract Tests (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Testes de integração (Testcontainers + PostgreSQL real)
+        run: python -m pytest -m integration --no-cov
+
+      - name: Contract tests (OpenAPI / Schemathesis)
+        run: python -m pytest -m contract --no-cov

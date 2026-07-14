@@ -16,7 +16,34 @@ async def test_mock_client_generates_consistent_data():
     assert len(first["movimentacoes"]) > 0
     assert first["classe"] == second["classe"]
     assert first["assunto"] == second["assunto"]
+    assert first["orgao_julgador"] == second["orgao_julgador"]
+    assert first["data_distribuicao"] == second["data_distribuicao"]
     assert len(first["movimentacoes"]) == len(second["movimentacoes"])
+
+
+@pytest.mark.asyncio
+async def test_mock_client_is_deterministic_and_isolated_from_global_random():
+    """
+    Garante determinismo total do mock (RN06) mesmo quando o estado global
+    do módulo `random` é alterado entre chamadas. Protege contra regressão
+    do bug em que o número da vara era sorteado antes de semear o gerador.
+    """
+    import random
+
+    client = DataJudClient()
+    cnj = "0009876-54.2023.8.26.0100"
+
+    random.seed(1)
+    first = await client.fetch_process_data(cnj, grau=1)
+
+    random.seed(999)
+    _ = [random.random() for _ in range(50)]
+    second = await client.fetch_process_data(cnj, grau=1)
+
+    assert first["orgao_julgador"] == second["orgao_julgador"]
+    assert first["classe"] == second["classe"]
+    assert first["assunto"] == second["assunto"]
+    assert first["data_distribuicao"] == second["data_distribuicao"]
 
 
 @pytest.mark.asyncio
@@ -154,3 +181,44 @@ async def test_fetch_with_api_key_falls_back_to_mock_on_http_error(monkeypatch):
 def test_tribunais_map_contains_expected_aliases():
     assert TRIBUNAIS_MAP["8.15"][2] == "tjpb"
     assert TRIBUNAIS_MAP["8.26"][2] == "tjsp"
+
+
+@pytest.mark.asyncio
+async def test_datajud_client_reuses_shared_http_client(monkeypatch):
+    """
+    Garante que múltiplas chamadas HTTP reutilizam o mesmo AsyncClient,
+    evitando abrir conexões TCP a cada requisição ao DataJud.
+    """
+    from app.services import datajud_client as mod
+
+    mod._module_http_client = None
+    created_clients: list[object] = []
+
+    class TrackingClient:
+        is_closed = False
+
+        def __init__(self, *args, **kwargs):
+            created_clients.append(self)
+
+        async def post(self, url, headers=None, json=None):
+            class FakeResponse:
+                def raise_for_status(self):
+                    return None
+
+                def json(self):
+                    return {"hits": {"hits": []}}
+
+            return FakeResponse()
+
+        async def aclose(self):
+            self.is_closed = True
+
+    monkeypatch.setattr("app.services.datajud_client.httpx.AsyncClient", TrackingClient)
+
+    client = DataJudClient()
+    client.api_key = "test-key"
+
+    await client.fetch_process_data("0001234-56.2023.8.15.0001", grau=1)
+    await client.fetch_process_data("0005678-90.2023.8.26.0001", grau=1)
+
+    assert len(created_clients) == 1

@@ -2,21 +2,24 @@ import logging
 import sys
 
 import structlog
+from structlog.types import Processor
 
 from app.core.config import settings
 
 
-def setup_logging():
+def setup_logging() -> None:
     # Clear existing handlers to avoid duplicates
     for h in logging.root.handlers[:]:
         logging.root.removeHandler(h)
 
-    shared_processors = [
+    shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.format_exc_info,
         structlog.processors.TimeStamper(fmt="iso"),
     ]
+
+    processors: list[Processor]
 
     if settings.ENV == "production":
         # Output structured JSON logs in production

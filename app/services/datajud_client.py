@@ -6,19 +6,17 @@ from typing import Any
 import httpx
 import structlog
 
+from app.core.cnj import (
+    TRIBUNAIS_MAP,
+    tribunal_alias_from_cnj,
+    tribunal_info_from_cnj,
+    tribunal_sigla_from_cnj,
+)
 from app.core.config import settings
 
 logger = structlog.get_logger()
 
-TRIBUNAIS_MAP = {
-    "8.15": ("TJPB", "Tribunal de Justiça da Paraíba", "tjpb"),
-    "8.26": ("TJSP", "Tribunal de Justiça de São Paulo", "tjsp"),
-    "8.19": ("TJRJ", "Tribunal de Justiça do Rio de Janeiro", "tjrj"),
-    "8.06": ("TJCE", "Tribunal de Justiça do Ceará", "tjce"),
-    "4.01": ("TRF1", "Tribunal Regional Federal da 1ª Região", "trf1"),
-    "4.02": ("TRF2", "Tribunal Regional Federal da 2ª Região", "trf2"),
-    "5.01": ("TRT1", "Tribunal Regional do Trabalho da 1ª Região", "trt1"),
-}
+__all__ = ["DataJudClient", "TRIBUNAIS_MAP", "close_shared_http_client"]
 
 CLASSES_EXEMPLO = [
     "Procedimento Comum Cível",
@@ -46,6 +44,24 @@ MOVIMENTACOES_EXEMPLO = [
     ("Decisão Saneadora Proferida", 25, 110),
     ("Designada Audiência de Conciliação", 28, 120),
 ]
+
+_module_http_client: httpx.AsyncClient | None = None
+
+
+def _get_shared_http_client() -> httpx.AsyncClient:
+    """Retorna um AsyncClient compartilhado (pool de conexões reutilizável)."""
+    global _module_http_client
+    if _module_http_client is None or _module_http_client.is_closed:
+        _module_http_client = httpx.AsyncClient(timeout=20.0)
+    return _module_http_client
+
+
+async def close_shared_http_client() -> None:
+    """Encerra o cliente HTTP compartilhado (chamado no shutdown da aplicação)."""
+    global _module_http_client
+    if _module_http_client is not None and not _module_http_client.is_closed:
+        await _module_http_client.aclose()
+    _module_http_client = None
 
 
 class DataJudClient:
@@ -97,17 +113,17 @@ class DataJudClient:
             }
         }
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": f"APIKey {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            response.raise_for_status()
-            body = response.json()
+        client = _get_shared_http_client()
+        response = await client.post(
+            url,
+            headers={
+                "Authorization": f"APIKey {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        response.raise_for_status()
+        body = response.json()
 
         hits = body.get("hits", {}).get("hits", [])
         if not hits:
@@ -118,12 +134,9 @@ class DataJudClient:
         return self._normalize_api_source(hits[0].get("_source", {}), numero_cnj)
 
     def _resolve_tribunal_alias(self, numero_cnj: str) -> str:
-        parts = numero_cnj.split(".")
-        if len(parts) >= 4:
-            tribunal_code = f"{parts[2]}.{parts[3]}"
-            tribunal_info = TRIBUNAIS_MAP.get(tribunal_code)
-            if tribunal_info:
-                return tribunal_info[2]
+        alias = tribunal_alias_from_cnj(numero_cnj)
+        if alias:
+            return alias
 
         raise ValueError(
             f"Tribunal não mapeado para o CNJ {numero_cnj}. "
@@ -178,13 +191,7 @@ class DataJudClient:
         }
 
     def _tribunal_sigla_from_cnj(self, numero_cnj: str) -> str:
-        parts = numero_cnj.split(".")
-        if len(parts) >= 4:
-            tribunal_code = f"{parts[2]}.{parts[3]}"
-            tribunal_info = TRIBUNAIS_MAP.get(tribunal_code)
-            if tribunal_info:
-                return tribunal_info[0]
-        return "TJSP"
+        return tribunal_sigla_from_cnj(numero_cnj) or "TJSP"
 
     def _generate_mock_data(self, numero_cnj: str, grau: int) -> dict[str, Any]:
         parts = numero_cnj.split(".")
@@ -192,29 +199,35 @@ class DataJudClient:
         ano_distribuicao = 2023
         try:
             if len(parts) >= 2:
-                ano_distribuicao = int(parts[1])
+                ano_candidato = int(parts[1])
+                # Protege contra segmentos de ano fora de um intervalo válido
+                # para datetime (ex: "0000"), que passam pela regex do CNJ
+                # mas não representam um ano real de distribuição.
+                if 1900 <= ano_candidato <= 2100:
+                    ano_distribuicao = ano_candidato
         except ValueError:
             pass
 
-        tribunal_code = "8.26"
-        if len(parts) >= 4:
-            tribunal_code = f"{parts[2]}.{parts[3]}"
-
-        sigla_tribunal, nome_tribunal, _ = TRIBUNAIS_MAP.get(
-            tribunal_code, ("TJSP", "Tribunal de Justiça de São Paulo", "tjsp")
+        sigla_tribunal, nome_tribunal, _ = tribunal_info_from_cnj(numero_cnj) or (
+            "TJSP",
+            "Tribunal de Justiça de São Paulo",
+            "tjsp",
         )
 
+        # Gerador local semeado pelo CNJ: garante determinismo (RN06) sem
+        # tocar no estado global do módulo `random` (thread-safe).
+        rng = random.Random(numero_cnj)
+
         orgao_codigo = parts[4] if len(parts) >= 5 else "0001"
-        orgao_julgador = f"{random.randint(1, 10)}ª Vara Cível de {nome_tribunal} (Comarca {orgao_codigo})"
+        orgao_julgador = f"{rng.randint(1, 10)}ª Vara Cível de {nome_tribunal} (Comarca {orgao_codigo})"
 
-        random.seed(numero_cnj)
-        classe = random.choice(CLASSES_EXEMPLO)
-        assunto = random.choice(ASSUNTOS_EXEMPLO)
+        classe = rng.choice(CLASSES_EXEMPLO)
+        assunto = rng.choice(ASSUNTOS_EXEMPLO)
 
-        mes = random.randint(1, 12)
-        dia = random.randint(1, 28)
+        mes = rng.randint(1, 12)
+        dia = rng.randint(1, 28)
         data_dist = datetime(
-            ano_distribuicao, mes, dia, random.randint(8, 18), random.randint(0, 59)
+            ano_distribuicao, mes, dia, rng.randint(8, 18), rng.randint(0, 59)
         )
 
         movs = []
@@ -231,8 +244,6 @@ class DataJudClient:
                         "codigo_movimento": cod,
                     }
                 )
-
-        random.seed(None)
 
         return {
             "numeroProcesso": numero_cnj,

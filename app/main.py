@@ -9,6 +9,7 @@ from app.api.process import router as process_router
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.logging import setup_logging
+from app.services.datajud_client import close_shared_http_client
 
 logger = structlog.get_logger()
 
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("application_started", version=settings.VERSION, env=settings.ENV)
     yield
+    await close_shared_http_client()
     logger.info("application_stopped")
 
 
@@ -31,10 +33,13 @@ app = FastAPI(
     ),
 )
 
+# A spec de CORS proíbe credenciais junto de origem wildcard ("*"),
+# então só habilitamos credenciais quando há origens explícitas.
+_allow_all_origins = "*" in settings.BACKEND_CORS_ORIGINS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_credentials=not _allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

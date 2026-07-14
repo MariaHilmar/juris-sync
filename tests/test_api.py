@@ -54,16 +54,19 @@ async def test_api_list_and_detail_processes(api_client: AsyncClient):
     list_response = await api_client.get("/api/v1/processos/")
     assert list_response.status_code == 200
     list_data = list_response.json()
-    assert len(list_data) >= 2
+    assert list_data["total"] >= 2
+    assert len(list_data["items"]) >= 2
+    assert list_data["limit"] == 20
+    assert list_data["offset"] == 0
 
     # 2. Testa Listagem com Filtro por Tribunal
     list_filtered = await api_client.get("/api/v1/processos/?tribunal=TJPB")
     assert list_filtered.status_code == 200
     filtered_data = list_filtered.json()
-    assert all(p["tribunal"] == "TJPB" for p in filtered_data)
+    assert all(p["tribunal"] == "TJPB" for p in filtered_data["items"])
 
     # 3. Testa Detalhe de Processo Específico
-    proc_id = list_data[0]["id"]
+    proc_id = list_data["items"][0]["id"]
     detail_response = await api_client.get(f"/api/v1/processos/{proc_id}")
     assert detail_response.status_code == 200
     detail_data = detail_response.json()

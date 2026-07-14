@@ -1,1 +1,1 @@
-# Package app.api — rotas serão adicionadas nas próximas sprints
+# Package app.api - rotas serão adicionadas nas próximas sprints

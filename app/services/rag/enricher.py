@@ -6,8 +6,8 @@ from typing import Any
 import httpx
 import structlog
 
+from app.core.cnj import tribunal_sigla_from_cnj
 from app.core.config import settings
-from app.services.datajud_client import TRIBUNAIS_MAP
 from app.services.rag.knowledge_base import KnowledgeChunk
 from app.services.rag.vector_store import InMemoryVectorStore
 
@@ -128,19 +128,6 @@ class DataJudRAGEnricher:
             if tribunal_chunk and tribunal_chunk.tribunal:
                 enriched["tribunal"] = tribunal_chunk.tribunal
 
-        for chunk, _ in retrieved:
-            if chunk.categoria == "classe" and enriched.get("classe"):
-                enriched["classe"] = (
-                    self._canonicalize(enriched["classe"], CANONICAL_CLASSES)
-                    or enriched["classe"]
-                )
-
-            if chunk.categoria == "assunto" and enriched.get("assunto"):
-                enriched["assunto"] = (
-                    self._canonicalize(enriched["assunto"], CANONICAL_ASSUNTOS)
-                    or enriched["assunto"]
-                )
-
         if enriched.get("classe"):
             enriched["classe"] = (
                 self._canonicalize(enriched["classe"], CANONICAL_CLASSES)
@@ -155,13 +142,7 @@ class DataJudRAGEnricher:
         return enriched
 
     def _tribunal_from_cnj(self, numero_cnj: str) -> str | None:
-        parts = numero_cnj.split(".")
-        if len(parts) < 4:
-            return None
-
-        tribunal_code = f"{parts[2]}.{parts[3]}"
-        sigla, _ = TRIBUNAIS_MAP.get(tribunal_code, (None, None, None))[:2]
-        return sigla
+        return tribunal_sigla_from_cnj(numero_cnj)
 
     def _is_valid_tribunal_sigla(self, tribunal: str) -> bool:
         return bool(re.match(r"^[A-Z]{2,5}\d?$", tribunal or ""))

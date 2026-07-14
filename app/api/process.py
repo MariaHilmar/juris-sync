@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Optional
+from typing import Optional
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.models.process import Processo
 from app.schemas.process import (
     ProcessoDetailRead,
+    ProcessoListResponse,
     ProcessoRead,
     ProcessoSyncRequest,
     ProcessoSyncResponse,
@@ -26,6 +27,11 @@ router = APIRouter(prefix="/processos", tags=["Processos Judiciais"])
     response_model=ProcessoSyncResponse,
     status_code=status.HTTP_200_OK,
     summary="Sincronizar Processo com o DataJud",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "Corpo da requisição não é um JSON válido."
+        }
+    },
 )
 async def sincronizar_processo(
     request: ProcessoSyncRequest, db: AsyncSession = Depends(get_db)
@@ -50,14 +56,22 @@ async def sincronizar_processo(
             movimentacoes_sincronizadas=resultado["movimentacoes_sincronizadas"],
         )
     except Exception as e:
-        logger.error("api_sync_endpoint_failed", error=str(e))
+        # Loga o detalhe completo internamente, mas devolve uma mensagem
+        # genérica ao cliente para não vazar detalhes de implementação.
+        logger.error(
+            "api_sync_endpoint_failed", numero_cnj=request.numero_cnj, error=str(e)
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro interno ao sincronizar processo: {str(e)}",
+            detail="Erro interno ao sincronizar processo. Tente novamente mais tarde.",
         ) from e
 
 
-@router.get("/", response_model=List[ProcessoRead], summary="Listar Processos Locais")
+@router.get(
+    "/",
+    response_model=ProcessoListResponse,
+    summary="Listar Processos Locais",
+)
 async def listar_processos(
     tribunal: Optional[str] = Query(
         None, description="Filtrar por sigla do tribunal (ex: TJPB, TJSP)"
@@ -67,21 +81,34 @@ async def listar_processos(
         20, ge=1, le=100, description="Número máximo de registros por página"
     ),
     offset: int = Query(
-        0, ge=0, description="Número de registros a pular para paginação"
+        0,
+        ge=0,
+        le=1_000_000,
+        description="Número de registros a pular para paginação",
     ),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Lista todos os processos armazenados localmente na nossa base de dados.
     Suporta paginação e filtros opcionais por tribunal ou classe.
+    A resposta inclui metadados (`total`, `limit`, `offset`) para navegação.
     """
     logger.info("api_list_processes_called", tribunal=tribunal, classe=classe)
 
-    query = select(Processo)
+    filtros = []
     if tribunal:
-        query = query.where(Processo.tribunal == tribunal.upper())
+        filtros.append(Processo.tribunal == tribunal.upper())
     if classe:
-        query = query.where(Processo.classe.ilike(f"%{classe}%"))
+        filtros.append(Processo.classe.ilike(f"%{classe}%"))
+
+    count_query = select(func.count(Processo.id))
+    if filtros:
+        count_query = count_query.where(*filtros)
+    total = (await db.execute(count_query)).scalar_one()
+
+    query = select(Processo)
+    if filtros:
+        query = query.where(*filtros)
 
     query = (
         query.order_by(desc(Processo.data_ultima_atualizacao))
@@ -91,7 +118,12 @@ async def listar_processos(
 
     result = await db.execute(query)
     processos = result.scalars().all()
-    return processos
+    return ProcessoListResponse(
+        items=processos,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get(
@@ -143,6 +175,11 @@ async def estatisticas_por_assunto(db: AsyncSession = Depends(get_db)):
     "/{process_id}",
     response_model=ProcessoDetailRead,
     summary="Obter Detalhes do Processo com Movimentações",
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Processo judicial não encontrado na base de dados."
+        }
+    },
 )
 async def obter_processo(process_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """

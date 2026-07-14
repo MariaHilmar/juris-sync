@@ -34,99 +34,25 @@ class JurisSyncService:
         """
         Sincroniza um processo judicial com base em seu número CNJ e grau de jurisdição.
         Pipeline: DataJud -> RAG -> Pydantic v2 -> Persistência idempotente.
+
+        Orquestra as etapas atômicas: em qualquer falha, faz rollback da
+        transação e propaga o erro ao chamador.
         """
         logger.info("process_sync_started", numero_cnj=numero_cnj, grau=grau)
 
         try:
-            # 1. Extração na origem externa (DataJud ou Mock)
-            raw_data = await self.client.fetch_process_data(numero_cnj, grau)
+            validated = await self._extrair_e_validar(numero_cnj, grau)
 
-            # 2. Recuperação e enriquecimento via RAG (antes da validação Pydantic)
-            enriched_data = await self.rag_enricher.enrich(raw_data, numero_cnj, grau)
-
-            # 3. Validação estrita com Pydantic v2
-            validated = DataJudProcessoSchema.from_enriched(enriched_data)
-            logger.info(
-                "pydantic_validation_completed",
-                numero_cnj=validated.numero_cnj,
-                rag_context_chunks=len(validated.contexto_rag),
-            )
-
-            # 4. Busca se o processo já existe na base local
-            stmt = select(Processo).where(Processo.numero_cnj == numero_cnj)
-            result = await self.db.execute(stmt)
-            processo: Optional[Processo] = result.scalar_one_or_none()
-
-            # 5. Criação ou atualização idempotente do processo
-            is_new = False
-            if not processo:
-                logger.info(
-                    "process_not_found_creating_new_record", numero_cnj=numero_cnj
-                )
-                processo = Processo(
-                    numero_cnj=validated.numero_cnj,
-                    classe=validated.classe,
-                    assunto=validated.assunto,
-                    tribunal=validated.tribunal,
-                    orgao_julgador=validated.orgao_julgador,
-                    data_distribuicao=validated.data_distribuicao,
-                    grau=validated.grau,
-                )
-                self.db.add(processo)
-                is_new = True
-            else:
-                logger.info("process_found_updating_record", numero_cnj=numero_cnj)
-                processo.classe = validated.classe
-                processo.assunto = validated.assunto
-                processo.orgao_julgador = validated.orgao_julgador
-                processo.grau = validated.grau
-                processo.data_ultima_atualizacao = datetime.now(UTC)
-
+            processo, is_new = await self._upsert_processo(numero_cnj, validated)
             await self.db.flush()
 
-            # 6. Sincronização idempotente de movimentações
-            stmt_movs = select(Movimentacao).where(
-                Movimentacao.processo_id == processo.id
+            new_movs_count = await self._sync_movimentacoes(
+                processo, validated.movimentacoes
             )
-            result_movs = await self.db.execute(stmt_movs)
-            existing_movs = result_movs.scalars().all()
-
-            existing_set = {
-                (
-                    (
-                        mov.data_hora.isoformat()
-                        if hasattr(mov.data_hora, "isoformat")
-                        else mov.data_hora
-                    ),
-                    mov.descricao,
-                )
-                for mov in existing_movs
-            }
-
-            new_movs_count = 0
-            for mov in validated.movimentacoes:
-                key = (mov.data_hora.isoformat(), mov.descricao)
-                if key not in existing_set:
-                    nova_mov = Movimentacao(
-                        processo_id=processo.id,
-                        data_hora=mov.data_hora,
-                        descricao=mov.descricao,
-                        complemento=mov.complemento,
-                        codigo_movimento=mov.codigo_movimento,
-                    )
-                    self.db.add(nova_mov)
-                    new_movs_count += 1
 
             await self.db.commit()
 
-            stmt_reload = (
-                select(Processo)
-                .execution_options(populate_existing=True)
-                .options(selectinload(Processo.movimentacoes))
-                .where(Processo.id == processo.id)
-            )
-            result_reload = await self.db.execute(stmt_reload)
-            processo = result_reload.scalar_one()
+            processo = await self._reload_com_movimentacoes(processo.id)
 
             logger.info(
                 "process_sync_completed",
@@ -151,3 +77,88 @@ class JurisSyncService:
             logger.error("process_sync_failed", numero_cnj=numero_cnj, error=str(error))
             await self.db.rollback()
             raise error
+
+    async def _extrair_e_validar(
+        self, numero_cnj: str, grau: int
+    ) -> DataJudProcessoSchema:
+        """Extrai da origem externa, enriquece via RAG e valida com Pydantic v2."""
+        raw_data = await self.client.fetch_process_data(numero_cnj, grau)
+        enriched_data = await self.rag_enricher.enrich(raw_data, numero_cnj, grau)
+
+        validated = DataJudProcessoSchema.from_enriched(enriched_data)
+        logger.info(
+            "pydantic_validation_completed",
+            numero_cnj=validated.numero_cnj,
+            rag_context_chunks=len(validated.contexto_rag),
+        )
+        return validated
+
+    async def _upsert_processo(
+        self, numero_cnj: str, validated: DataJudProcessoSchema
+    ) -> tuple[Processo, bool]:
+        """Cria ou atualiza o processo de forma idempotente. Retorna (processo, is_new)."""
+        stmt = select(Processo).where(Processo.numero_cnj == numero_cnj)
+        result = await self.db.execute(stmt)
+        processo: Optional[Processo] = result.scalar_one_or_none()
+
+        if not processo:
+            logger.info("process_not_found_creating_new_record", numero_cnj=numero_cnj)
+            processo = Processo(
+                numero_cnj=validated.numero_cnj,
+                classe=validated.classe,
+                assunto=validated.assunto,
+                tribunal=validated.tribunal,
+                orgao_julgador=validated.orgao_julgador,
+                data_distribuicao=validated.data_distribuicao,
+                grau=validated.grau,
+            )
+            self.db.add(processo)
+            return processo, True
+
+        logger.info("process_found_updating_record", numero_cnj=numero_cnj)
+        processo.classe = validated.classe
+        processo.assunto = validated.assunto
+        processo.orgao_julgador = validated.orgao_julgador
+        processo.grau = validated.grau
+        processo.data_ultima_atualizacao = datetime.now(UTC)
+        return processo, False
+
+    async def _sync_movimentacoes(
+        self, processo: Processo, movimentacoes: list[Any]
+    ) -> int:
+        """Insere apenas movimentações inéditas (idempotência por data_hora + descrição)."""
+        stmt_movs = select(Movimentacao).where(Movimentacao.processo_id == processo.id)
+        result_movs = await self.db.execute(stmt_movs)
+        existing_movs = result_movs.scalars().all()
+
+        existing_set = {
+            (mov.data_hora.isoformat(), mov.descricao) for mov in existing_movs
+        }
+
+        new_movs_count = 0
+        for mov in movimentacoes:
+            key = (mov.data_hora.isoformat(), mov.descricao)
+            if key not in existing_set:
+                self.db.add(
+                    Movimentacao(
+                        processo_id=processo.id,
+                        data_hora=mov.data_hora,
+                        descricao=mov.descricao,
+                        complemento=mov.complemento,
+                        codigo_movimento=mov.codigo_movimento,
+                    )
+                )
+                new_movs_count += 1
+
+        return new_movs_count
+
+    async def _reload_com_movimentacoes(self, processo_id: Any) -> Processo:
+        """Recarrega o processo com as movimentações já materializadas (evita N+1)."""
+        stmt_reload = (
+            select(Processo)
+            .execution_options(populate_existing=True)
+            .options(selectinload(Processo.movimentacoes))
+            .where(Processo.id == processo_id)
+        )
+        result_reload = await self.db.execute(stmt_reload)
+        return result_reload.scalar_one()

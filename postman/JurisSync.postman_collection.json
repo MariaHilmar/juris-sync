@@ -1,0 +1,295 @@
+{
+  "info": {
+    "name": "JurisSync API",
+    "description": "Coleção da JurisSync API - monitoramento, ingestão de dados jurídicos (DataJud/CNJ) e Jurimetria.\n\nUse o environment \"JurisSync - Local\" para apontar para http://localhost:8000.\n\nFluxo sugerido:\n1. Health Check\n2. Sincronizar Processo (POST /processos/sync) - salva `processo_id` automaticamente na variável de coleção\n3. Obter Detalhes do Processo (usa `{{processo_id}}`)\n4. Listar Processos / Jurimetria",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "b6f2a9d0-2f3e-4c9b-9d1a-1b1c1e6a9f01"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000", "type": "string" },
+    { "key": "apiPrefix", "value": "/api/v1", "type": "string" },
+    { "key": "numero_cnj", "value": "0801234-56.2023.8.15.0001", "type": "string" },
+    { "key": "processo_id", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Monitoring",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Verifica a saúde da API, do banco de dados e o modo de operação do motor DataJud (mock ou configurado)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Corpo possui campo status', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('status');",
+                  "    pm.expect(body).to.have.property('services');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Processos Judiciais",
+      "item": [
+        {
+          "name": "Sincronizar Processo com o DataJud",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"numero_cnj\": \"{{numero_cnj}}\",\n  \"grau\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}{{apiPrefix}}/processos/sync",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "processos", "sync"]
+            },
+            "description": "Aciona o motor de sincronização para buscar dados atualizados de um processo judicial no DataJud (ou gerar dados simulados caso a chave da API não esteja configurada). Persiste o processo e suas movimentações de forma idempotente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Sincronização bem-sucedida', () => {",
+                  "    pm.expect(body.sucesso).to.eql(true);",
+                  "});",
+                  "",
+                  "pm.test('Processo retornado possui id e tribunal', () => {",
+                  "    pm.expect(body.processo).to.have.property('id');",
+                  "    pm.expect(body.processo).to.have.property('tribunal');",
+                  "});",
+                  "",
+                  "// Salva o id do processo sincronizado para uso nas próximas requisições da coleção",
+                  "if (body.processo && body.processo.id) {",
+                  "    pm.collectionVariables.set('processo_id', body.processo.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Sincronizar Processo (CNJ inválido - 422 esperado)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"numero_cnj\": \"cnj-invalido\",\n  \"grau\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}{{apiPrefix}}/processos/sync",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "processos", "sync"]
+            },
+            "description": "Caso negativo: valida que a API rejeita um número CNJ fora do padrão NNNNNNN-DD.YYYY.J.TR.OOOO com 422 Unprocessable Entity."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 422 (validação Pydantic)', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Listar Processos Locais",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}{{apiPrefix}}/processos/?limit=20&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "processos", ""],
+              "query": [
+                { "key": "limit", "value": "20" },
+                { "key": "offset", "value": "0" },
+                { "key": "tribunal", "value": "TJPB", "disabled": true },
+                { "key": "classe", "value": "Dano Moral", "disabled": true }
+              ]
+            },
+            "description": "Lista os processos armazenados localmente, com paginação e filtros opcionais por tribunal (sigla exata) ou classe (busca parcial)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Resposta paginada com metadados', () => {",
+                  "    pm.expect(body).to.have.property('items');",
+                  "    pm.expect(body).to.have.property('total');",
+                  "    pm.expect(body).to.have.property('limit', 20);",
+                  "    pm.expect(body).to.have.property('offset', 0);",
+                  "    pm.expect(body.items).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Obter Detalhes do Processo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}{{apiPrefix}}/processos/{{processo_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "processos", "{{processo_id}}"]
+            },
+            "description": "Obtém a ficha completa do processo (incluindo movimentações ordenadas). Requer que `processo_id` esteja definido - execute antes a requisição \"Sincronizar Processo com o DataJud\", que preenche essa variável automaticamente."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('processo_id')) {",
+                  "    console.warn('processo_id não definido. Rode primeiro a requisição de sincronização.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Processo possui movimentações', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('movimentacoes');",
+                  "    pm.expect(body.movimentacoes).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Obter Processo Inexistente (404 esperado)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}{{apiPrefix}}/processos/00000000-0000-0000-0000-000000000000",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "processos", "00000000-0000-0000-0000-000000000000"]
+            },
+            "description": "Caso negativo: valida que a API retorna 404 para um UUID válido, porém inexistente na base."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Jurimetria: Distribuição por Tribunal",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}{{apiPrefix}}/processos/stats/por-tribunal",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "processos", "stats", "por-tribunal"]
+            },
+            "description": "Agrupa os processos cadastrados por tribunal de origem, contabilizando o volume."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Resposta é uma lista de agregações', () => {",
+                  "    pm.expect(pm.response.json()).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Jurimetria: Distribuição por Assunto",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}{{apiPrefix}}/processos/stats/por-assunto",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "processos", "stats", "por-assunto"]
+            },
+            "description": "Agrupa os processos por assunto jurídico, identificando os temas mais comuns na base."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Resposta é uma lista de agregações', () => {",
+                  "    pm.expect(pm.response.json()).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -7,9 +7,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.core.database import Base, get_db
 from app.main import app
-from app.models import Movimentacao, Processo  # noqa: F401 — registra metadados
+from app.models import Movimentacao, Processo  # noqa: F401 - registra metadados
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+
+@pytest.fixture(autouse=True)
+def _reset_datajud_shared_http_client():
+    """Isola o pool HTTP compartilhado do DataJud entre testes."""
+    from app.services import datajud_client as mod
+
+    mod._module_http_client = None
+    yield
+    mod._module_http_client = None
 
 
 @pytest.fixture(scope="session")

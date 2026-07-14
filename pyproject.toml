@@ -50,4 +50,17 @@ python_files = ["test_*.py"]
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
-addopts = "--cov=app --cov-report=term-missing --cov-fail-under=85"
+markers = [
+    "integration: testes de integração que exigem Docker (Testcontainers) para subir dependências reais (ex: PostgreSQL).",
+    "contract: testes de contrato de API (Schemathesis) validados contra o schema OpenAPI da aplicação.",
+]
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=85 -m \"not integration and not contract\""
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
