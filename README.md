@@ -21,8 +21,9 @@ Projeto de portfólio com foco em boas práticas de engenharia: camadas bem defi
 - **RAG em memória** - normalização de classe, assunto e tribunal antes da validação Pydantic
 - **Alembic** - versionamento de schema (`processos`, `movimentacoes`)
 - **Structlog** - logs legíveis em dev, JSON em produção
-- **Pytest** - 23 testes, cobertura ≥ 85%
-- **GitHub Actions** - lint (Ruff, Black, Mypy) + testes em cada push/PR
+- **43 testes em 5 camadas** - unitário, API (ASGI), mock HTTP (`respx`), reconciliação de sync, integração (Testcontainers) e contrato OpenAPI (Schemathesis) - cobertura ≥ 85%
+- **Documentação de requisitos** - regras de negócio, histórias de usuário, cenários BDD e rastreabilidade requisito → código → teste em [`docs/requisitos.md`](docs/requisitos.md)
+- **GitHub Actions** - lint (Ruff, Black, Mypy) + testes (unitário + integração + contrato) em cada push/PR
 
 ---
 
