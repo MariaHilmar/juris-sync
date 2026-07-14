@@ -106,6 +106,8 @@ async def test_fetch_with_api_key_calls_http_and_parses_response(monkeypatch):
     client.api_key = "test-key"
 
     class FakeResponse:
+        status_code = 200
+
         def raise_for_status(self):
             return None
 
@@ -140,7 +142,7 @@ async def test_fetch_with_api_key_calls_http_and_parses_response(monkeypatch):
         async def post(self, url, headers=None, json=None):
             assert "api_publica_tjpb/_search" in url
             assert headers["Authorization"] == "APIKey test-key"
-            assert json["query"]["match"]["numeroProcesso"] == "00012345620238150001"
+            assert json["query"]["term"]["numeroProcesso"] == "00012345620238150001"
             return FakeResponse()
 
     monkeypatch.setattr("app.services.datajud_client.httpx.AsyncClient", FakeClient)
@@ -202,6 +204,8 @@ async def test_datajud_client_reuses_shared_http_client(monkeypatch):
 
         async def post(self, url, headers=None, json=None):
             class FakeResponse:
+                status_code = 200
+
                 def raise_for_status(self):
                     return None
 

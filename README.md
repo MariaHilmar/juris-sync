@@ -7,9 +7,13 @@
 
 API REST assíncrona para **monitoramento, ingestão e jurimetria** de processos judiciais, integrada à [API Pública do DataJud (CNJ)](https://datajud-wiki.cnj.jus.br/api-publica/).
 
-Projeto de portfólio com foco em boas práticas de engenharia: camadas bem definidas, persistência idempotente, logs estruturados, migrações versionadas e pipeline de CI.
+Projeto de portfólio que vai além de mostrar *como* integrar uma API: a intenção é demonstrar **como documentar e testar durante o desenvolvimento**, não só o resultado final.
 
-📄 **Documentação de requisitos:** regras de negócio, histórias de usuário, critérios de aceite e cenários BDD estão em [`docs/requisitos.md`](docs/requisitos.md).
+- **Implementação** - camadas bem definidas, persistência idempotente, integração com o DataJud, logs estruturados, migrações versionadas e pipeline de CI.
+- **Vibe docs** - requisitos, regras de negócio, histórias de usuário, cenários BDD e rastreabilidade requisito → código → teste em [`docs/requisitos.md`](docs/requisitos.md), escritos em paralelo ao código (documentação viva, não pós-facto).
+- **Testes no fluxo de desenvolvimento** - suíte em camadas (unitário, API, mock HTTP, reconciliação, integração e contrato) guiando refatorações e evolução do domínio, com cobertura mínima de 85% no CI.
+
+📄 **Documentação de requisitos:** [`docs/requisitos.md`](docs/requisitos.md)
 
 ---
 

@@ -71,7 +71,8 @@ async def test_fetch_from_api_sends_expected_request_contract(
     assert sent_request.headers["Content-Type"] == "application/json"
 
     body = json.loads(sent_request.content)
-    assert body["query"]["match"]["numeroProcesso"] == "00012345620238150001"
+    assert body["size"] == 1
+    assert body["query"]["term"]["numeroProcesso"] == "00012345620238150001"
 
     assert data["classe"] == "Procedimento Comum Cível"
     assert data["assunto"] == "Dano Moral"
@@ -103,6 +104,7 @@ async def test_fetch_from_api_http_server_error_falls_back_to_mock(
     client_with_key: DataJudClient,
 ):
     cnj = "0001234-56.2023.8.15.0001"
+    client_with_key.retry_base_delay = 0  # evita esperas reais de backoff no teste
     respx.post(re.compile(r".*api_publica_tjpb/_search")).mock(
         return_value=httpx.Response(500, json={"error": "internal_server_error"})
     )
@@ -119,6 +121,7 @@ async def test_fetch_from_api_network_timeout_falls_back_to_mock(
     client_with_key: DataJudClient,
 ):
     cnj = "0001234-56.2023.8.15.0001"
+    client_with_key.retry_base_delay = 0  # evita esperas reais de backoff no teste
     respx.post(re.compile(r".*api_publica_tjpb/_search")).mock(
         side_effect=httpx.ConnectTimeout("timeout simulado")
     )

@@ -1,3 +1,4 @@
+import asyncio
 import random
 import re
 from datetime import datetime, timedelta
@@ -16,7 +17,30 @@ from app.core.config import settings
 
 logger = structlog.get_logger()
 
-__all__ = ["DataJudClient", "TRIBUNAIS_MAP", "close_shared_http_client"]
+__all__ = [
+    "DataJudClient",
+    "TRIBUNAIS_MAP",
+    "close_shared_http_client",
+    "DataJudError",
+    "DataJudNotFoundError",
+    "DataJudTransientError",
+]
+
+# Status HTTP que indicam falha transitória e valem retry (rate limit + 5xx).
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+class DataJudError(Exception):
+    """Erro base da integração com o DataJud."""
+
+
+class DataJudNotFoundError(DataJudError):
+    """Processo não encontrado na origem (não é falha transitória)."""
+
+
+class DataJudTransientError(DataJudError):
+    """Falha transitória (timeout, rede, 429, 5xx) - elegível a retry."""
+
 
 CLASSES_EXEMPLO = [
     "Procedimento Comum Cível",
@@ -74,6 +98,19 @@ class DataJudClient:
     def __init__(self) -> None:
         self.api_key = settings.DATAJUD_API_KEY
         self.base_url = settings.DATAJUD_API_URL.rstrip("/")
+        # Retry com backoff exponencial para falhas transitórias.
+        # Expostos como atributos de instância para facilitar override em testes.
+        self.max_retries = 2
+        self.retry_base_delay = 0.5
+
+    @property
+    def _mock_fallback_enabled(self) -> bool:
+        """
+        O fallback para dados fictícios só é seguro fora de produção.
+        Em produção, uma falha real deve propagar em vez de mascarar dados
+        inventados como se fossem oficiais.
+        """
+        return settings.ENV != "production"
 
     async def fetch_process_data(
         self, numero_cnj: str, grau: int = 1
@@ -83,21 +120,54 @@ class DataJudClient:
         if self.api_key:
             logger.info("datajud_client_request_started", numero_cnj=numero_cnj)
             try:
-                data = await self._fetch_from_api(numero_cnj, numero_limpo)
+                data = await self._fetch_with_retry(numero_cnj, numero_limpo)
                 logger.info("datajud_client_request_success", numero_cnj=numero_cnj)
                 return data
+            except DataJudNotFoundError as error:
+                logger.warning(
+                    "datajud_client_process_not_found",
+                    numero_cnj=numero_cnj,
+                    error=str(error),
+                )
+                if not self._mock_fallback_enabled:
+                    raise
             except Exception as error:
                 logger.error(
                     "datajud_client_request_failed",
                     error=str(error),
                     numero_cnj=numero_cnj,
                 )
-                logger.info(
-                    "datajud_client_activating_mock_fallback", numero_cnj=numero_cnj
-                )
+                if not self._mock_fallback_enabled:
+                    raise
+            logger.info(
+                "datajud_client_activating_mock_fallback", numero_cnj=numero_cnj
+            )
 
         logger.info("datajud_client_generating_mock_data", numero_cnj=numero_cnj)
         return self._generate_mock_data(numero_cnj, grau)
+
+    async def _fetch_with_retry(
+        self, numero_cnj: str, numero_limpo: str
+    ) -> dict[str, Any]:
+        """Executa a chamada com retry + backoff exponencial em falhas transitórias."""
+        attempt = 0
+        while True:
+            try:
+                return await self._fetch_from_api(numero_cnj, numero_limpo)
+            except DataJudTransientError as error:
+                if attempt >= self.max_retries:
+                    raise
+                delay = self.retry_base_delay * (2**attempt)
+                logger.warning(
+                    "datajud_client_retrying",
+                    numero_cnj=numero_cnj,
+                    attempt=attempt + 1,
+                    max_retries=self.max_retries,
+                    delay_seconds=delay,
+                    error=str(error),
+                )
+                await asyncio.sleep(delay)
+                attempt += 1
 
     async def _fetch_from_api(
         self, numero_cnj: str, numero_limpo: str
@@ -105,29 +175,51 @@ class DataJudClient:
         tribunal_alias = self._resolve_tribunal_alias(numero_cnj)
         url = f"{self.base_url}/api_publica_{tribunal_alias}/_search"
 
+        # `term` (não `match`) porque o número CNJ é um identificador exato:
+        # evita análise full-text e o risco de recall indevido. `size: 1`
+        # deixa explícito que só o hit correspondente interessa.
         payload = {
+            "size": 1,
             "query": {
-                "match": {
+                "term": {
                     "numeroProcesso": numero_limpo,
                 }
-            }
+            },
         }
 
         client = _get_shared_http_client()
-        response = await client.post(
-            url,
-            headers={
-                "Authorization": f"APIKey {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-        response.raise_for_status()
+        try:
+            response = await client.post(
+                url,
+                headers={
+                    "Authorization": f"APIKey {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as error:
+            raise DataJudTransientError(
+                f"Falha de rede ao consultar o DataJud ({tribunal_alias}): {error}"
+            ) from error
+
+        if response.status_code in RETRYABLE_STATUS:
+            raise DataJudTransientError(
+                f"DataJud retornou status {response.status_code} "
+                f"({tribunal_alias}) para o processo {numero_cnj}."
+            )
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            raise DataJudError(
+                f"Erro não recuperável do DataJud ({tribunal_alias}): {error}"
+            ) from error
+
         body = response.json()
 
         hits = body.get("hits", {}).get("hits", [])
         if not hits:
-            raise ValueError(
+            raise DataJudNotFoundError(
                 f"Processo {numero_cnj} não encontrado no DataJud ({tribunal_alias})."
             )
 
