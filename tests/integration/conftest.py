@@ -14,6 +14,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -71,14 +72,14 @@ def apply_migrations(postgres_url: str) -> None:
         settings.DATABASE_URL = original_url
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def postgres_engine(postgres_url: str, apply_migrations: None):
     engine = create_async_engine(postgres_url, pool_pre_ping=True)
     yield engine
     await engine.dispose()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(loop_scope="session")
 async def pg_session(postgres_engine) -> AsyncGenerator[AsyncSession, None]:
     """
     Sessão isolada por teste com savepoints, no mesmo padrão do db_session
@@ -98,7 +99,7 @@ async def pg_session(postgres_engine) -> AsyncGenerator[AsyncSession, None]:
         await transaction.rollback()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(loop_scope="session")
 async def pg_api_client(pg_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     async def _override_get_db():
         yield pg_session

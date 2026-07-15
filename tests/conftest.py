@@ -1,7 +1,7 @@
-import asyncio
 from collections.abc import AsyncGenerator
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -22,14 +22,7 @@ def _reset_datajud_shared_http_client():
     mod._module_http_client = None
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def test_engine():
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 
@@ -44,7 +37,7 @@ async def test_engine():
     await engine.dispose()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(loop_scope="session")
 async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     """
       Sessão isolada por teste com savepoints para suportar commits
@@ -64,7 +57,7 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
         await transaction.rollback()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(loop_scope="session")
 async def api_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     async def _override_get_db():
         yield db_session
