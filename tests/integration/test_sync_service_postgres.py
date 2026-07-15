@@ -13,10 +13,9 @@ from sqlalchemy import select
 from app.models.process import Movimentacao, Processo
 from app.services.sync_service import JurisSyncService
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="session")]
 
 
-@pytest.mark.asyncio
 async def test_sync_process_persists_correctly_on_real_postgres(pg_session):
     cnj = "0801234-56.2023.8.15.0001"
     service = JurisSyncService(pg_session)
@@ -36,7 +35,6 @@ async def test_sync_process_persists_correctly_on_real_postgres(pg_session):
     assert processo.data_ultima_atualizacao is not None
 
 
-@pytest.mark.asyncio
 async def test_sync_is_idempotent_on_real_postgres(pg_session):
     cnj = "0805555-22.2023.8.26.0001"
     service = JurisSyncService(pg_session)
@@ -51,7 +49,6 @@ async def test_sync_is_idempotent_on_real_postgres(pg_session):
     assert len(processos) == 1
 
 
-@pytest.mark.asyncio
 async def test_sync_unique_constraint_on_numero_cnj_is_enforced(pg_session):
     """
     A constraint UNIQUE de numero_cnj deve ser respeitada mesmo no dialeto
@@ -68,10 +65,9 @@ async def test_sync_unique_constraint_on_numero_cnj_is_enforced(pg_session):
     assert total == 1
 
 
-@pytest.mark.asyncio
 async def test_api_sync_flow_against_real_postgres(pg_api_client):
     response = await pg_api_client.post(
-        "/processos/sync",
+        "/api/v1/processos/sync",
         json={"numero_cnj": "0809999-11.2024.8.19.0003", "grau": 1},
     )
 
@@ -80,7 +76,9 @@ async def test_api_sync_flow_against_real_postgres(pg_api_client):
     assert body["sucesso"] is True
     assert body["processo"]["tribunal"] == "TJRJ"
 
-    listagem = await pg_api_client.get("/processos/", params={"tribunal": "TJRJ"})
+    listagem = await pg_api_client.get(
+        "/api/v1/processos/", params={"tribunal": "TJRJ"}
+    )
     assert listagem.status_code == 200
     body_listagem = listagem.json()
     assert any(
@@ -88,7 +86,6 @@ async def test_api_sync_flow_against_real_postgres(pg_api_client):
     )
 
 
-@pytest.mark.asyncio
 async def test_reconciliation_movement_delete_cascade_on_real_postgres(pg_session):
     """
     Valida o ON DELETE CASCADE real do PostgreSQL entre processos e
