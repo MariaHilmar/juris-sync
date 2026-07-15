@@ -14,6 +14,21 @@ from app.services.rag.enricher import DataJudRAGEnricher
 logger = structlog.get_logger()
 
 
+def _movement_identity_key(data_hora: datetime, descricao: str) -> tuple[str, str]:
+    """
+    Chave estável para idempotência de movimentações.
+
+    Normaliza datetimes naive/aware para UTC antes de comparar, evitando
+    duplicatas quando o PostgreSQL devolve timestamptz com offset e a origem
+    envia valores naive (comum no mock e em alguns tribunais).
+    """
+    if data_hora.tzinfo is None:
+        normalized = data_hora.replace(tzinfo=UTC)
+    else:
+        normalized = data_hora.astimezone(UTC)
+    return normalized.isoformat(), descricao
+
+
 class JurisSyncService:
     """
     Serviço central de Negócio responsável por orquestrar a busca de dados na API DataJud,
@@ -132,12 +147,13 @@ class JurisSyncService:
         existing_movs = result_movs.scalars().all()
 
         existing_set = {
-            (mov.data_hora.isoformat(), mov.descricao) for mov in existing_movs
+            _movement_identity_key(mov.data_hora, mov.descricao)
+            for mov in existing_movs
         }
 
         new_movs_count = 0
         for mov in movimentacoes:
-            key = (mov.data_hora.isoformat(), mov.descricao)
+            key = _movement_identity_key(mov.data_hora, mov.descricao)
             if key not in existing_set:
                 self.db.add(
                     Movimentacao(
