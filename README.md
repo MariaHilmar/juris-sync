@@ -7,13 +7,47 @@
 
 API REST assíncrona para **monitoramento, ingestão e jurimetria** de processos judiciais, integrada à [API Pública do DataJud (CNJ)](https://datajud-wiki.cnj.jus.br/api-publica/).
 
-Projeto de portfólio que vai além de mostrar *como* integrar uma API: a intenção é demonstrar **como documentar e testar durante o desenvolvimento**, não só o resultado final.
+## Escopo: portfólio (não é produção)
+
+Este repositório e o dashboard [juris-sync-web](https://github.com/MariaHilmar/juris-sync-web) existem **exclusivamente para o portfólio técnico**. São artefatos para avaliação em ambiente local (clone + run), não um serviço público em produção.
+
+- **Hub / case study:** [maria-portfolio](https://github.com/MariaHilmar/maria-portfolio) · [site](https://mariahilmar-portfolio.vercel.app)
+- **Mock** (padrão, sem chave) ou **DataJud real** (chave própria do testador) - ver [guia do testador](https://github.com/MariaHilmar/juris-sync-web/blob/main/docs/guia-do-testador.md)
+
+A intenção do projeto é demonstrar **como documentar e testar durante o desenvolvimento**, não só o resultado final.
 
 - **Implementação** - camadas bem definidas, persistência idempotente, integração com o DataJud, logs estruturados, migrações versionadas e pipeline de CI.
 - **Vibe docs** - requisitos, regras de negócio, histórias de usuário, cenários BDD e rastreabilidade requisito → código → teste em [`docs/requisitos.md`](docs/requisitos.md), escritos em paralelo ao código (documentação viva, não pós-facto).
 - **Testes no fluxo de desenvolvimento** - suíte em camadas (unitário, API, mock HTTP, reconciliação, integração e contrato) guiando refatorações e evolução do domínio, com cobertura mínima de 85% no CI.
 
 📄 **Documentação de requisitos:** [`docs/requisitos.md`](docs/requisitos.md)
+
+📋 **Case study (portfólio):** [mariahilmar-portfolio.vercel.app](https://mariahilmar-portfolio.vercel.app) · narrativa em [`../maria-portfolio/docs/case-study-juris-sync.md`](../maria-portfolio/docs/case-study-juris-sync.md) quando clonado com o hub no workspace local
+
+🖥️ **Dashboard (Next.js):** [juris-sync-web](https://github.com/MariaHilmar/juris-sync-web) · [Guia do testador](https://github.com/MariaHilmar/juris-sync-web/blob/main/docs/guia-do-testador.md) (clone local, mock vs dados reais)
+
+---
+
+## Como testar localmente (quem clona do GitHub)
+
+Qualquer pessoa pode baixar este repositório, configurar o ambiente e validar a API - com ou sem credencial do CNJ.
+
+| Modo | `DATAJUD_API_KEY` | Comportamento |
+|------|-------------------|---------------|
+| **Mock (padrão)** | vazio | Dados determinísticos gerados a partir do CNJ; ideal para demo e CI local |
+| **Real (DataJud)** | chave CNJ | Consulta a [API Pública DataJud](https://datajud-wiki.cnj.jus.br/api-publica/); use CNJs reais |
+
+O endpoint `/health` indica o modo ativo: `services.datajud_api` = `mock_mode` ou `configured`.
+
+**Fluxo recomendado:**
+
+1. Clone `juris-sync` e `juris-sync-web`
+2. Suba a API (seção [Execução local](#execução-local))
+3. (Opcional mock) Rode `python scripts/seed_demo.py` para jurimetria mais rica
+4. (Opcional real) Preencha `DATAJUD_API_KEY` no `.env` e sincronize CNJs reais
+5. Suba o dashboard e acesse http://localhost:3000
+
+Guia completo para testadores: [juris-sync-web/docs/guia-do-testador.md](https://github.com/MariaHilmar/juris-sync-web/blob/main/docs/guia-do-testador.md)
 
 ---
 
@@ -44,6 +78,31 @@ graph TD
     Service --> RAG[DataJudRAGEnricher]
     Service --> DB[(PostgreSQL / SQLite)]
 ```
+
+### Cliente web (dashboard)
+
+O dashboard de jurimetria e processos está no repositório **[juris-sync-web](https://github.com/MariaHilmar/juris-sync-web)** (Next.js + React + TypeScript), consumindo esta API via HTTP.
+
+**Subir API + dashboard localmente:**
+
+```powershell
+# Terminal 1 - API
+cd juris-sync
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Terminal 2 - Dashboard
+cd ..\juris-sync-web
+npm install
+npm run dev
+```
+
+- API: http://localhost:8000 (Swagger em `/docs`)
+- Dashboard: http://localhost:3000
+
+Em desenvolvimento, `BACKEND_CORS_ORIGINS=*` (padrão) já permite o frontend. Em produção, liste a origem do deploy Vercel do dashboard.
+
+**Teste local:** quem clona os dois repositórios pode rodar API + dashboard sem deploy. Modo mock (sem chave CNJ) ou dados reais (com `DATAJUD_API_KEY`) - ver [Guia do testador](https://github.com/MariaHilmar/juris-sync-web/blob/main/docs/guia-do-testador.md).
 
 ### Fluxo de sincronização
 
@@ -125,7 +184,21 @@ Uso pretendido: onboarding, debug manual e smoke test pontual - não substitui p
 
 - Python **3.12+**
 - (Opcional) Docker e Docker Compose
-- (Opcional) Chave da API Pública DataJud - [solicitar no CNJ](https://datajud-wiki.cnj.jus.br/api-publica/acesso/)
+- (Opcional) Chave da API Pública DataJud - [solicitar no CNJ](https://datajud-wiki.cnj.jus.br/api-publica/acesso/) - **necessária apenas para dados reais; sem chave, o modo mock funciona out of the**
+
+---
+
+## Dados de demonstração (modo mock)
+
+Sem `DATAJUD_API_KEY`, a API opera em **modo mock**: gera processos e movimentações plausíveis a partir do número CNJ (determinístico - o mesmo CNJ sempre produz os mesmos dados).
+
+Para popular a base local com processos em **várias UFs** (mapa e gráficos do dashboard):
+
+```powershell
+python scripts/seed_demo.py
+```
+
+O seed cobre os 27 tribunais de justiça estaduais com **116 processos** e volumes assimétricos por UF (ex.: SP 15, RJ 12, AC/AP 1) para o mapa choropleth ficar legível. Isso **não substitui** o teste com DataJud real - são cenários complementares.
 
 ---
 
@@ -152,7 +225,7 @@ API disponível em http://localhost:8000
 | Variável | Descrição | Padrão |
 |----------|-----------|--------|
 | `DATABASE_URL` | Conexão async (SQLite ou PostgreSQL) | `sqlite+aiosqlite:///./juris_sync.db` |
-| `DATAJUD_API_KEY` | Chave API CNJ (vazio = mock) | - |
+| `DATAJUD_API_KEY` | Chave API CNJ. **Vazio = modo mock** (demo local sem credencial). **Preenchida = consulta real** ao DataJud | - |
 | `DATAJUD_API_URL` | Base da API pública | `https://api-publica.datajud.cnj.jus.br` |
 | `ENV` | `development` / `production` | `development` |
 

@@ -99,7 +99,11 @@ ENV/
 env/
 .env
 .venv
+.venv.bak*/
 pip-selfcheck.json
+
+# Ruff
+.ruff_cache/
 
 # PEP 582; used by e.g. pdm
 __pypackages__/
