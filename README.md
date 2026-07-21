@@ -352,6 +352,18 @@ O workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) executa em pus
 | **Test** | `pytest` com cobertura (suíte unitária/API) |
 | **Integration** | Testes com PostgreSQL real (Testcontainers) + contract testing (Schemathesis) |
 
+### Code review
+
+- **Revisão humana** em pull requests (template em [`.github/pull_request_template.md`](.github/pull_request_template.md))
+- **Cursor Bugbot** em PRs com regras do domínio em [`.cursor/BUGBOT.md`](.cursor/BUGBOT.md) (idempotência, reconciliação, contrato DataJud)
+- Ative o Bugbot no [dashboard do Cursor](https://cursor.com/dashboard) para o repositório `MariaHilmar/juris-sync`
+
+---
+
+## Metodologia
+
+Este projeto foi desenvolvido com **ferramentas de IA generativa** sob a metodologia de **Especificação Direcionada (SDD)**: requisitos, regras de negócio e cenários BDD foram definidos antes ou em paralelo à implementação (`docs/requisitos.md`), e o código passou por **revisão humana rigorosa** (code review, testes em 5 camadas com ~90% de cobertura). A IA acelerou boilerplate e documentação; a idempotência, reconciliação e contratos HTTP são validados pela suíte de testes e pela rastreabilidade requisito → código → teste documentada em `docs/`.
+
 ---
 
 ## Estrutura do projeto

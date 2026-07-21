@@ -15,6 +15,7 @@
 7. [Regras de validação de dados](#7-regras-de-validação-de-dados)
 8. [Requisitos não funcionais](#8-requisitos-não-funcionais)
 9. [Rastreabilidade requisito -> código -> teste](#9-rastreabilidade-requisito---código---teste)
+10. [Metodologia de desenvolvimento](#10-metodologia-de-desenvolvimento)
 
 ---
 
@@ -411,6 +412,19 @@ Essas regras de validação foram, inclusive, endurecidas a partir de achados do
 | Contrato OpenAPI (seção 7) | `app/schemas/process.py` | `tests/contract/test_openapi_contract.py` (Schemathesis) |
 | Reconciliação de dados | `app/services/sync_service.py` | `tests/test_sync_reconciliation.py` |
 | Integração com PostgreSQL real | - | `tests/integration/` (Testcontainers) |
+
+---
+
+## 10. Metodologia de desenvolvimento
+
+Este projeto utilizou **ferramentas de IA generativa** sob a metodologia de **Especificação Direcionada (SDD - Specification-Driven Development)**:
+
+1. **Especificação** - requisitos, regras de negócio (RN01-RN16), cenários BDD e histórias de usuário definidos antes ou em paralelo à implementação (este documento).
+2. **Geração assistida** - boilerplate, documentação e parte da estrutura acelerados com IA generativa.
+3. **Revisão humana** - todo código passou por **code review manual** e revisão automatizada em PRs (Cursor Bugbot, regras em `.cursor/BUGBOT.md`): idempotência de sync, reconciliação, contrato DataJud e atomicidade validados por testes automatizados (43 testes, ~90% de cobertura).
+4. **Rastreabilidade** - cada regra referencia arquivo e linha no repositório; a matriz da seção 9 liga requisito → código → teste.
+
+A IA acelerou a produção; a **correção e a coerência** são responsabilidade da revisão humana e da suíte de testes.
 
 ---
 
