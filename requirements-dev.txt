@@ -12,7 +12,7 @@ mypy>=1.11.0
 respx>=0.21.1
 
 # Testes de integração com PostgreSQL real via Docker
-testcontainers[postgres]>=4.9.0
+testcontainers[postgres]>=4.14.2
 psycopg2-binary>=2.9.9
 
 # Contract testing do schema OpenAPI
