@@ -16,4 +16,4 @@ testcontainers[postgres]>=4.9.0
 psycopg2-binary>=2.9.9
 
 # Contract testing do schema OpenAPI
-schemathesis>=3.35.0
+schemathesis>=4.24.2
