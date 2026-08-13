@@ -7,6 +7,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.errors import http_exception_from_sync_error
 from app.core.database import get_db
 from app.models.process import Processo
 from app.schemas.process import (
@@ -15,6 +16,8 @@ from app.schemas.process import (
     ProcessoRead,
     ProcessoSyncRequest,
     ProcessoSyncResponse,
+    StatsAssuntoItem,
+    StatsTribunalItem,
 )
 from app.services.sync_service import JurisSyncService
 
@@ -29,8 +32,21 @@ router = APIRouter(prefix="/processos", tags=["Processos Judiciais"])
     summary="Sincronizar Processo com o DataJud",
     responses={
         status.HTTP_400_BAD_REQUEST: {
-            "description": "Corpo da requisição não é um JSON válido."
-        }
+            "description": "Requisição inválida (ex.: tribunal não mapeado)."
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Processo não encontrado na origem DataJud."
+        },
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {
+            "description": "Número CNJ ou payload inválido."
+        },
+        status.HTTP_502_BAD_GATEWAY: {"description": "Falha ao consultar o DataJud."},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "DataJud temporariamente indisponível."
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "description": "Erro interno inesperado no pipeline de sincronização."
+        },
     },
 )
 async def sincronizar_processo(
@@ -46,7 +62,6 @@ async def sincronizar_processo(
     try:
         resultado = await service.sync_process(request.numero_cnj, request.grau)
 
-        # Converte o modelo do banco para o schema Pydantic de resposta
         processo_read = ProcessoRead.model_validate(resultado["processo"])
 
         return ProcessoSyncResponse(
@@ -54,17 +69,32 @@ async def sincronizar_processo(
             mensagem=resultado["mensagem"],
             processo=processo_read,
             movimentacoes_sincronizadas=resultado["movimentacoes_sincronizadas"],
+            contexto_enriquecimento=resultado.get("contexto_enriquecimento") or [],
         )
-    except Exception as e:
-        # Loga o detalhe completo internamente, mas devolve uma mensagem
-        # genérica ao cliente para não vazar detalhes de implementação.
+    except HTTPException:
+        raise
+    except Exception as error:
         logger.error(
-            "api_sync_endpoint_failed", numero_cnj=request.numero_cnj, error=str(e)
+            "api_sync_endpoint_failed",
+            numero_cnj=request.numero_cnj,
+            error=str(error),
+            error_type=type(error).__name__,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erro interno ao sincronizar processo. Tente novamente mais tarde.",
-        ) from e
+        raise http_exception_from_sync_error(error) from error
+
+
+@router.api_route(
+    "/sync",
+    methods=["GET", "PUT", "PATCH", "DELETE"],
+    include_in_schema=False,
+)
+async def sincronizar_metodo_nao_permitido():
+    """Evita que GET /processos/sync seja interpretado como UUID em /{process_id}."""
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="Sincronização exige POST /api/v1/processos/sync com JSON {numero_cnj, grau}.",
+        headers={"Allow": "POST"},
+    )
 
 
 @router.get(
@@ -127,7 +157,9 @@ async def listar_processos(
 
 
 @router.get(
-    "/stats/por-tribunal", summary="Jurimetria: Distribuição de Processos por Tribunal"
+    "/stats/por-tribunal",
+    response_model=list[StatsTribunalItem],
+    summary="Jurimetria: Distribuição de Processos por Tribunal",
 )
 async def estatisticas_por_tribunal(db: AsyncSession = Depends(get_db)):
     """
@@ -148,7 +180,9 @@ async def estatisticas_por_tribunal(db: AsyncSession = Depends(get_db)):
 
 
 @router.get(
-    "/stats/por-assunto", summary="Jurimetria: Distribuição de Processos por Assunto"
+    "/stats/por-assunto",
+    response_model=list[StatsAssuntoItem],
+    summary="Jurimetria: Distribuição de Processos por Assunto",
 )
 async def estatisticas_por_assunto(db: AsyncSession = Depends(get_db)):
     """

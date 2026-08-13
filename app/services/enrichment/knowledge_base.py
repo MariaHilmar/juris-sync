@@ -1,3 +1,8 @@
+"""Glossário jurídico em memória para canonicalizar classe, assunto e tribunal.
+
+Não é uma base RAG: são trechos curtos usados como dicionário de normalização.
+"""
+
 from dataclasses import dataclass
 
 

@@ -82,7 +82,7 @@ async def test_reconciliation_reflects_source_updates_on_resync(db_session):
 @pytest.mark.asyncio
 async def test_reconciliation_rolls_back_completely_on_partial_failure(db_session):
     """
-    Se o pipeline falhar após a extração (ex: erro no enriquecimento RAG),
+    Se o pipeline falhar após a extração (ex.: erro no enriquecimento),
     nenhum dado parcial pode permanecer no banco. Reconciliação exige
     atomicidade: tudo ou nada.
     """
@@ -90,13 +90,13 @@ async def test_reconciliation_rolls_back_completely_on_partial_failure(db_sessio
 
     class FailingEnricher:
         async def enrich(self, raw_data, numero_cnj, grau):
-            raise RuntimeError("Falha simulada no pipeline de enriquecimento RAG")
+            raise RuntimeError("Falha simulada no pipeline de enriquecimento")
 
     movimentacoes_antes = len(
         (await db_session.execute(select(Movimentacao))).scalars().all()
     )
 
-    service = JurisSyncService(db_session, rag_enricher=FailingEnricher())
+    service = JurisSyncService(db_session, enricher=FailingEnricher())
 
     with pytest.raises(RuntimeError):
         await service.sync_process(cnj, grau=1)

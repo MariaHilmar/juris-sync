@@ -1,3 +1,9 @@
+"""Normaliza payload DataJud com glossário local antes da validação Pydantic.
+
+Isto não é RAG de produção: não há embeddings de modelo, banco vetorial nem
+geração de resposta. O LLM opcional só polimento de campos já normalizados.
+"""
+
 import json
 import re
 from datetime import datetime
@@ -8,8 +14,8 @@ import structlog
 
 from app.core.cnj import tribunal_sigla_from_cnj
 from app.core.config import settings
-from app.services.rag.knowledge_base import KnowledgeChunk
-from app.services.rag.vector_store import InMemoryVectorStore
+from app.services.enrichment.glossary_index import InMemoryGlossaryIndex
+from app.services.enrichment.knowledge_base import KnowledgeChunk
 
 logger = structlog.get_logger()
 
@@ -31,14 +37,11 @@ CANONICAL_CLASSES = {
 }
 
 
-class DataJudRAGEnricher:
-    """
-    Camada RAG que recupera contexto jurídico e enriquece dados brutos do DataJud
-    antes da validação estrita via Pydantic v2.
-    """
+class DataJudEnricher:
+    """Canonicaliza classe, assunto e tribunal com glossário em memória."""
 
-    def __init__(self, vector_store: InMemoryVectorStore | None = None):
-        self.vector_store = vector_store or InMemoryVectorStore()
+    def __init__(self, glossary: InMemoryGlossaryIndex | None = None):
+        self.glossary = glossary or InMemoryGlossaryIndex()
 
     async def enrich(
         self,
@@ -47,11 +50,11 @@ class DataJudRAGEnricher:
         grau: int,
     ) -> dict[str, Any]:
         query = self._build_query(raw_data, numero_cnj)
-        retrieved = self.vector_store.search(query, top_k=settings.RAG_TOP_K)
+        retrieved = self.glossary.search(query, top_k=settings.ENRICHMENT_TOP_K)
         context_chunks = [chunk.texto for chunk, _ in retrieved]
 
         logger.info(
-            "rag_retrieval_completed",
+            "enrichment_glossary_matched",
             numero_cnj=numero_cnj,
             chunks_retrieved=len(context_chunks),
             top_score=retrieved[0][1] if retrieved else 0.0,
@@ -63,7 +66,7 @@ class DataJudRAGEnricher:
         if settings.OPENAI_API_KEY:
             enriched = await self._llm_refine(enriched, context_chunks)
 
-        enriched["contexto_rag"] = context_chunks
+        enriched["contexto_enriquecimento"] = context_chunks
         return enriched
 
     def _build_query(self, raw_data: dict[str, Any], numero_cnj: str) -> str:
@@ -159,11 +162,12 @@ class DataJudRAGEnricher:
         payload: dict[str, Any],
         context_chunks: list[str],
     ) -> dict[str, Any]:
+        """Polimento opcional de campos. Falhas não interrompem o sync (RN09)."""
         prompt = {
             "contexto_juridico": context_chunks,
             "dados_brutos": payload,
             "instrucao": (
-                "Normalize classe, assunto e tribunal com base no contexto jurídico. "
+                "Normalize classe, assunto e tribunal com base no glossário. "
                 "Retorne apenas JSON compatível com o schema de processo."
             ),
         }
@@ -181,7 +185,10 @@ class DataJudRAGEnricher:
                         "messages": [
                             {
                                 "role": "system",
-                                "content": "Você normaliza dados jurídicos brasileiros e responde somente em JSON.",
+                                "content": (
+                                    "Você normaliza dados jurídicos brasileiros "
+                                    "e responde somente em JSON."
+                                ),
                             },
                             {
                                 "role": "user",
@@ -195,8 +202,8 @@ class DataJudRAGEnricher:
                 content = response.json()["choices"][0]["message"]["content"]
                 refined = json.loads(content)
                 payload.update({k: v for k, v in refined.items() if k in payload})
-                logger.info("rag_llm_refinement_applied")
+                logger.info("enrichment_llm_refinement_applied")
         except Exception as error:
-            logger.warning("rag_llm_refinement_skipped", error=str(error))
+            logger.warning("enrichment_llm_refinement_skipped", error=str(error))
 
         return payload

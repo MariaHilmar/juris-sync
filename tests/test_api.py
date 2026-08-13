@@ -1,7 +1,10 @@
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+
+from app.services.datajud_client import DataJudNotFoundError, DataJudTransientError
 
 
 @pytest.mark.asyncio
@@ -116,3 +119,50 @@ async def test_api_jurimetria_stats_endpoints(api_client: AsyncClient):
     data_assunto = stats_assunto.json()
     assert len(data_assunto) > 0
     assert "total_processos" in data_assunto[0]
+
+
+@pytest.mark.asyncio
+async def test_api_sync_get_returns_405(api_client: AsyncClient):
+    """GET /sync não deve ser interpretado como UUID em /{process_id}."""
+    response = await api_client.get("/api/v1/processos/sync")
+    assert response.status_code == 405
+    assert "POST" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_api_sync_exposes_enrichment_context(api_client: AsyncClient):
+    response = await api_client.post(
+        "/api/v1/processos/sync",
+        json={"numero_cnj": "0005555-11.2023.8.15.0001", "grau": 1},
+    )
+    assert response.status_code == 200
+    assert "contexto_enriquecimento" in response.json()
+    assert isinstance(response.json()["contexto_enriquecimento"], list)
+
+
+@pytest.mark.asyncio
+async def test_api_sync_maps_datajud_not_found_to_404(api_client: AsyncClient):
+    with patch(
+        "app.api.process.JurisSyncService.sync_process",
+        new_callable=AsyncMock,
+        side_effect=DataJudNotFoundError("ausente"),
+    ):
+        response = await api_client.post(
+            "/api/v1/processos/sync",
+            json={"numero_cnj": "0006666-11.2023.8.26.0001", "grau": 1},
+        )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_sync_maps_transient_error_to_503(api_client: AsyncClient):
+    with patch(
+        "app.api.process.JurisSyncService.sync_process",
+        new_callable=AsyncMock,
+        side_effect=DataJudTransientError("timeout"),
+    ):
+        response = await api_client.post(
+            "/api/v1/processos/sync",
+            json={"numero_cnj": "0007777-11.2023.8.26.0001", "grau": 1},
+        )
+    assert response.status_code == 503

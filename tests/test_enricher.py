@@ -1,13 +1,13 @@
 import pytest
 
 from app.schemas.datajud import DataJudProcessoSchema
-from app.services.rag.enricher import DataJudRAGEnricher
-from app.services.rag.vector_store import InMemoryVectorStore
+from app.services.enrichment.enricher import DataJudEnricher
+from app.services.enrichment.glossary_index import InMemoryGlossaryIndex
 
 
 @pytest.mark.asyncio
-async def test_rag_enricher_retrieves_context_and_normalizes_fields():
-    enricher = DataJudRAGEnricher()
+async def test_enricher_retrieves_context_and_normalizes_fields():
+    enricher = DataJudEnricher()
     raw_data = {
         "numeroProcesso": "0801234-56.2023.8.15.0001",
         "classe": "procedimento comum cível",
@@ -32,13 +32,13 @@ async def test_rag_enricher_retrieves_context_and_normalizes_fields():
     assert validated.tribunal == "TJPB"
     assert validated.classe == "Procedimento Comum Cível"
     assert validated.assunto == "Indenização por Dano Moral"
-    assert len(validated.contexto_rag) > 0
+    assert len(validated.contexto_enriquecimento) > 0
     assert len(validated.movimentacoes) == 1
 
 
 @pytest.mark.asyncio
-async def test_rag_pipeline_rejects_invalid_cnj_after_enrichment():
-    enricher = DataJudRAGEnricher()
+async def test_enrichment_rejects_invalid_cnj_after_normalization():
+    enricher = DataJudEnricher()
     raw_data = {
         "numeroProcesso": "numero-invalido",
         "tribunal": "TJSP",
@@ -51,9 +51,9 @@ async def test_rag_pipeline_rejects_invalid_cnj_after_enrichment():
         DataJudProcessoSchema.from_enriched(enriched)
 
 
-def test_vector_store_returns_relevant_chunks_for_legal_query():
-    store = InMemoryVectorStore()
-    results = store.search("dano moral tjsp consumidor", top_k=2)
+def test_glossary_index_returns_relevant_chunks_for_legal_query():
+    index = InMemoryGlossaryIndex()
+    results = index.search("dano moral tjsp consumidor", top_k=2)
 
     assert len(results) > 0
     categories = {chunk.categoria for chunk, _ in results}

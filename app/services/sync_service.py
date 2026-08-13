@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.models.process import Movimentacao, Processo
 from app.schemas.datajud import DataJudProcessoSchema
 from app.services.datajud_client import DataJudClient
-from app.services.rag.enricher import DataJudRAGEnricher
+from app.services.enrichment.enricher import DataJudEnricher
 
 logger = structlog.get_logger()
 
@@ -31,24 +31,24 @@ def _movement_identity_key(data_hora: datetime, descricao: str) -> tuple[str, st
 
 class JurisSyncService:
     """
-    Serviço central de Negócio responsável por orquestrar a busca de dados na API DataJud,
-    enriquecimento via RAG, validação Pydantic e persistência idempotente.
+    Serviço central de negócio: busca no DataJud, enriquecimento por glossário,
+    validação Pydantic e persistência idempotente.
     """
 
     def __init__(
         self,
         db: AsyncSession,
         client: Optional[DataJudClient] = None,
-        rag_enricher: Optional[DataJudRAGEnricher] = None,
+        enricher: Optional[DataJudEnricher] = None,
     ):
         self.db = db
         self.client = client or DataJudClient()
-        self.rag_enricher = rag_enricher or DataJudRAGEnricher()
+        self.enricher = enricher or DataJudEnricher()
 
     async def sync_process(self, numero_cnj: str, grau: int = 1) -> dict[str, Any]:
         """
         Sincroniza um processo judicial com base em seu número CNJ e grau de jurisdição.
-        Pipeline: DataJud -> RAG -> Pydantic v2 -> Persistência idempotente.
+        Pipeline: DataJud -> enriquecimento (glossário) -> Pydantic v2 -> persistência.
 
         Orquestra as etapas atômicas: em qualquer falha, faz rollback da
         transação e propaga o erro ao chamador.
@@ -85,7 +85,7 @@ class JurisSyncService:
                 ),
                 "processo": processo,
                 "movimentacoes_sincronizadas": new_movs_count,
-                "contexto_rag": validated.contexto_rag,
+                "contexto_enriquecimento": validated.contexto_enriquecimento,
             }
 
         except Exception as error:
@@ -96,15 +96,15 @@ class JurisSyncService:
     async def _extrair_e_validar(
         self, numero_cnj: str, grau: int
     ) -> DataJudProcessoSchema:
-        """Extrai da origem externa, enriquece via RAG e valida com Pydantic v2."""
+        """Extrai da origem, normaliza com glossário e valida com Pydantic v2."""
         raw_data = await self.client.fetch_process_data(numero_cnj, grau)
-        enriched_data = await self.rag_enricher.enrich(raw_data, numero_cnj, grau)
+        enriched_data = await self.enricher.enrich(raw_data, numero_cnj, grau)
 
         validated = DataJudProcessoSchema.from_enriched(enriched_data)
         logger.info(
             "pydantic_validation_completed",
             numero_cnj=validated.numero_cnj,
-            rag_context_chunks=len(validated.contexto_rag),
+            enrichment_chunks=len(validated.contexto_enriquecimento),
         )
         return validated
 

@@ -31,9 +31,12 @@ class DataJudProcessoSchema(BaseModel):
     )
     grau: int = Field(1, ge=1, le=3, description="Grau de jurisdição")
     movimentacoes: List[DataJudMovimentacaoSchema] = Field(default_factory=list)
-    contexto_rag: List[str] = Field(
+    contexto_enriquecimento: List[str] = Field(
         default_factory=list,
-        description="Trechos de conhecimento jurídico recuperados pelo RAG",
+        description=(
+            "Trechos do glossário local usados na normalização de classe, "
+            "assunto e tribunal (não é RAG de produção)"
+        ),
     )
 
     @field_validator("numero_cnj")

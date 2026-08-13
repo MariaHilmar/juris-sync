@@ -1,8 +1,14 @@
+"""Índice lexical em memória (frequência de termos + cosseno).
+
+Não é um vector store de embeddings. Serve só para ranquear trechos do
+glossário local na normalização de campos.
+"""
+
 import math
 import re
 from collections import Counter
 
-from app.services.rag.knowledge_base import LEGAL_KNOWLEDGE_BASE, KnowledgeChunk
+from app.services.enrichment.knowledge_base import LEGAL_KNOWLEDGE_BASE, KnowledgeChunk
 
 
 def _tokenize(text: str) -> list[str]:
@@ -10,7 +16,7 @@ def _tokenize(text: str) -> list[str]:
     return [token for token in tokens if len(token) > 2]
 
 
-def _embed(text: str) -> dict[str, float]:
+def _term_weights(text: str) -> dict[str, float]:
     tokens = _tokenize(text)
     if not tokens:
         return {}
@@ -34,20 +40,20 @@ def _cosine_similarity(left: dict[str, float], right: dict[str, float]) -> float
     return dot_product / (left_norm * right_norm)
 
 
-class InMemoryVectorStore:
+class InMemoryGlossaryIndex:
     def __init__(self, chunks: list[KnowledgeChunk] | None = None):
         self._chunks = chunks or LEGAL_KNOWLEDGE_BASE
-        self._embeddings = {
-            chunk.id: _embed(" ".join([chunk.texto, *chunk.termos_chave]))
+        self._weights = {
+            chunk.id: _term_weights(" ".join([chunk.texto, *chunk.termos_chave]))
             for chunk in self._chunks
         }
 
     def search(self, query: str, top_k: int = 3) -> list[tuple[KnowledgeChunk, float]]:
-        query_embedding = _embed(query)
+        query_weights = _term_weights(query)
         scored: list[tuple[KnowledgeChunk, float]] = []
 
         for chunk in self._chunks:
-            score = _cosine_similarity(query_embedding, self._embeddings[chunk.id])
+            score = _cosine_similarity(query_weights, self._weights[chunk.id])
             keyword_bonus = sum(
                 0.15 for term in chunk.termos_chave if term in query.lower()
             )
