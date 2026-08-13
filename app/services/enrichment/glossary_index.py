@@ -34,7 +34,7 @@ def _cosine_similarity(left: dict[str, float], right: dict[str, float]) -> float
     left_norm = math.sqrt(sum(value * value for value in left.values()))
     right_norm = math.sqrt(sum(value * value for value in right.values()))
 
-    if left_norm == 0.0 or right_norm == 0.0:
+    if left_norm < 1e-12 or right_norm < 1e-12:
         return 0.0
 
     return dot_product / (left_norm * right_norm)
