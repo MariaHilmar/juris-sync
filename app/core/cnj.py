@@ -3,7 +3,7 @@ Utilitários de parsing do número CNJ (padrão NNNNNNN-DD.YYYY.J.TR.OOOO).
 
 Centraliza o mapa de tribunais e a extração de segmentos do CNJ para evitar
 duplicação da mesma lógica de `split(".")` espalhada entre o cliente DataJud
-e o enriquecedor RAG.
+e o enriquecedor de glossário.
 """
 
 # Mapa J.TR -> (sigla, nome completo, alias da API pública do DataJud).

@@ -21,7 +21,7 @@
 
 ## 1. Visão do produto
 
-O **JurisSync** é uma API que sincroniza processos judiciais brasileiros com a **API Pública do DataJud (CNJ)**, enriquece os dados com contexto jurídico (RAG) e os disponibiliza localmente para consulta e análise de Jurimetria (distribuição de processos por tribunal e por assunto).
+O **JurisSync** é uma API que sincroniza processos judiciais brasileiros com a **API Pública do DataJud (CNJ)**, normaliza os dados com um glossário jurídico em memória e os disponibiliza localmente para consulta e análise de Jurimetria (distribuição de processos por tribunal e por assunto).
 
 **Problema que resolve:** acompanhar processos judiciais exige consultar tribunais individualmente ou a API do DataJud repetidamente. O JurisSync centraliza, normaliza e mantém um histórico local consultável, evitando duplicidade de dados e permitindo análise agregada.
 
@@ -40,7 +40,7 @@ O **JurisSync** é uma API que sincroniza processos judiciais brasileiros com a 
 | **Sincronização (sync)** | Operação que busca o estado atual de um processo na fonte externa (DataJud ou mock) e reconcilia com o banco local |
 | **DataJud** | API pública do CNJ que expõe dados processuais de tribunais brasileiros |
 | **Modo mock** | Quando `DATAJUD_API_KEY` não está configurada (ou a chamada real falha), o sistema gera dados determinísticos e plausíveis a partir do próprio número CNJ |
-| **RAG (Retrieval-Augmented Generation)** | Camada que recupera trechos de uma base de conhecimento jurídico em memória e usa esse contexto para normalizar/canonicalizar campos como classe, assunto e tribunal |
+| **Enriquecimento (glossário)** | Camada que canonicaliza classe, assunto e tribunal com um dicionário jurídico em memória e similaridade lexical. **Não é RAG de produção** (sem embeddings de modelo nem banco vetorial). |
 | **Jurimetria** | Análise estatística agregada dos processos armazenados (contagem por tribunal, por assunto) |
 | **Idempotência** | Propriedade pela qual sincronizar o mesmo processo múltiplas vezes não gera duplicatas |
 | **Reconciliação** | Processo de garantir que o dado local seja fiel (sem duplicar, sem perder, sem órfãos) ao dado da fonte externa |
@@ -63,7 +63,7 @@ Não há autenticação de usuário final nos endpoints hoje - qualquer cliente 
 
 ## 4. Regras de negócio
 
-As regras abaixo foram extraídas do comportamento real implementado em `app/services/sync_service.py`, `app/services/datajud_client.py`, `app/services/rag/enricher.py` e `app/api/process.py`.
+As regras abaixo foram extraídas do comportamento real implementado em `app/services/sync_service.py`, `app/services/datajud_client.py`, `app/services/enrichment/enricher.py` e `app/api/process.py`.
 
 ### RN01 - Unicidade do processo por número CNJ
 Cada processo é identificado de forma única pelo `numero_cnj` (constraint `UNIQUE` no banco). Não pode existir mais de um registro de `Processo` com o mesmo número CNJ.
@@ -80,7 +80,7 @@ Uma movimentação é considerada "já existente" se a combinação `(data_hora,
 > Código: `JurisSyncService.sync_process`, construção de `existing_set` e comparação por `key` (linhas 94-118).
 
 ### RN04 - Pipeline de sincronização é atômico (tudo ou nada)
-O pipeline segue a ordem: **Extração (DataJud/mock) -> Enriquecimento RAG -> Validação Pydantic -> Persistência**. Se qualquer etapa falhar, a transação é revertida (`rollback`) e nenhum dado parcial (nem o processo, nem movimentações) é persistido.
+O pipeline segue a ordem: **Extração (DataJud/mock) -> Enriquecimento (glossário) -> Validação Pydantic -> Persistência**. Se qualquer etapa falhar, a transação é revertida (`rollback`) e nenhum dado parcial (nem o processo, nem movimentações) é persistido.
 > Código: bloco `try/except` com `await self.db.rollback()` em caso de erro (linhas 150-153); validado por `tests/test_sync_reconciliation.py::test_reconciliation_rolls_back_completely_on_partial_failure`.
 
 ### RN05 - Fallback automático para modo mock
@@ -95,13 +95,13 @@ O gerador de mock usa o próprio número CNJ como seed (`random.seed(numero_cnj)
 O tribunal (sigla, nome e alias de API) é determinado pelos segmentos `J` (justiça) e `TR` (tribunal) do número CNJ, consultando o mapa `TRIBUNAIS_MAP`. Se o segmento não estiver mapeado, uma chamada real à API é rejeitada com erro; no mock, o tribunal cai para `TJSP` como padrão.
 > Código: `DataJudClient._resolve_tribunal_alias`, `_tribunal_sigla_from_cnj` (linhas 120-131, 180-187).
 
-### RN08 - Enriquecimento RAG antes da validação estrita
-Antes de validar os dados com o schema Pydantic (`DataJudProcessoSchema`), o sistema recupera até `RAG_TOP_K` (padrão: 3) trechos de conhecimento jurídico relevantes e usa esse contexto para: (a) corrigir o tribunal quando a sigla informada é inválida, (b) canonicalizar `classe` e `assunto` para os termos padronizados da base de conhecimento.
-> Código: `JurisSyncService.sync_process` (linhas 44-53); `DataJudRAGEnricher.enrich` (`app/services/rag/enricher.py`).
+### RN08 - Enriquecimento por glossário antes da validação estrita
+Antes de validar os dados com o schema Pydantic (`DataJudProcessoSchema`), o sistema consulta até `ENRICHMENT_TOP_K` (padrão: 3) trechos do glossário local e usa esse contexto para: (a) corrigir o tribunal quando a sigla informada é inválida, (b) canonicalizar `classe` e `assunto` para os termos padronizados.
+> Código: `JurisSyncService._extrair_e_validar`; `DataJudEnricher.enrich` (`app/services/enrichment/enricher.py`). Decisão: [`docs/adr/004-enrichment-nao-e-rag.md`](adr/004-enrichment-nao-e-rag.md).
 
 ### RN09 - Refinamento opcional via LLM
-Se `OPENAI_API_KEY` estiver configurada, uma chamada adicional a um endpoint compatível com OpenAI Chat Completions tenta refinar `classe`, `assunto` e `tribunal` usando o contexto RAG recuperado. Falhas nessa etapa são **toleradas** (log de warning) e não interrompem a sincronização - o dado normalizado pela regra RN08 permanece válido.
-> Código: `DataJudRAGEnricher._llm_refine` (linhas 176-221).
+Se `OPENAI_API_KEY` estiver configurada, uma chamada adicional a um endpoint compatível com OpenAI Chat Completions tenta refinar `classe`, `assunto` e `tribunal` usando os trechos do glossário. Falhas nessa etapa são **toleradas** (log de warning) e não interrompem a sincronização - o dado normalizado pela regra RN08 permanece válido.
+> Código: `DataJudEnricher._llm_refine`.
 
 ### RN10 - Grau de jurisdição restrito a 1, 2 ou 3
 O campo `grau` só aceita os valores 1 (primeira instância), 2 ou 3 (instâncias superiores/recursais). Qualquer valor fora desse intervalo é rejeitado na validação de entrada.
@@ -224,7 +224,7 @@ Formato: `Como <ator>, quero <ação>, para <benefício>`, com critérios de ace
 **Critérios de aceite:**
 - Dada uma classe processual com variações textuais (ex.: "execução" em qualquer caixa), o sistema a canonicaliza para o termo padrão da base de conhecimento (ex.: "Execução de Título Extrajudicial").
 - Dado um tribunal inválido/ausente na origem, mas identificável pelo CNJ, o sistema corrige o tribunal automaticamente.
-- O contexto jurídico recuperado (trechos usados na normalização) é exposto na resposta de sincronização (`contexto_rag`).
+- O contexto do glossário usado na normalização é exposto na resposta de sincronização (`contexto_enriquecimento`).
 
 ---
 
@@ -272,7 +272,7 @@ Funcionalidade: Sincronização de processos judiciais
 
   Cenário: Reverter completamente a sincronização em caso de falha no pipeline
     Dado um número CNJ inédito "0812347-33.2023.8.26.0005"
-    E que o enriquecimento RAG irá falhar durante o processamento
+    E que o enriquecimento irá falhar durante o processamento
     Quando eu solicitar a sincronização desse processo
     Então a API deve propagar o erro
     E nenhum processo deve ter sido criado na base local
@@ -403,7 +403,8 @@ Essas regras de validação foram, inclusive, endurecidas a partir de achados do
 | RN05, US03 (fallback mock) | `app/services/datajud_client.py` | `tests/test_datajud_client_contract.py` (respx: 404, 500, timeout) |
 | RN06, US02 (determinismo do mock) | `DataJudClient._generate_mock_data` | `tests/test_datajud_client.py::test_mock_client_generates_consistent_data` |
 | RN07 (resolução de tribunal) | `DataJudClient._resolve_tribunal_alias` | `tests/test_datajud_client.py::test_resolve_tribunal_alias_from_cnj` |
-| RN08, US08 (enriquecimento RAG) | `app/services/rag/enricher.py` | `tests/test_rag_enricher.py` |
+| RN08, US08 (enriquecimento) | `app/services/enrichment/enricher.py` | `tests/test_enricher.py` |
+| Erros HTTP do sync (404/422/503) | `app/api/errors.py` | `tests/test_sync_errors.py`, `tests/test_api.py` |
 | RN11 (cascade delete) | `app/models/process.py` | `tests/integration/test_sync_service_postgres.py::test_reconciliation_movement_delete_cascade_on_real_postgres` |
 | RN12, RN13, RN14, US04 (listagem) | `app/api/process.py::listar_processos` | `tests/test_api.py` |
 | US05 (detalhe/404) | `app/api/process.py::obter_processo` | `tests/test_api.py`; `postman/JurisSync.postman_collection.json` (caso 404) |

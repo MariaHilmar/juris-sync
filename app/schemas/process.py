@@ -169,3 +169,17 @@ class ProcessoSyncResponse(BaseModel):
     mensagem: str
     processo: Optional[ProcessoRead] = None
     movimentacoes_sincronizadas: int = 0
+    contexto_enriquecimento: List[str] = Field(
+        default_factory=list,
+        description="Trechos do glossário usados na normalização deste sync",
+    )
+
+
+class StatsTribunalItem(BaseModel):
+    tribunal: str = Field(..., description="Sigla do tribunal")
+    total_processos: int = Field(..., ge=0, description="Quantidade de processos")
+
+
+class StatsAssuntoItem(BaseModel):
+    assunto: str = Field(..., description="Assunto jurídico normalizado")
+    total_processos: int = Field(..., ge=0, description="Quantidade de processos")

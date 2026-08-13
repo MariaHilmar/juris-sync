@@ -27,7 +27,7 @@ def test_datajud_schema_accepts_valid_payload():
                 "codigo_movimento": 1,
             }
         ],
-        "contexto_rag": ["contexto"],
+        "contexto_enriquecimento": ["contexto"],
     }
 
     schema = DataJudProcessoSchema.model_validate(payload)

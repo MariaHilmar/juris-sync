@@ -17,7 +17,6 @@ import asyncio
 import pytest
 import schemathesis
 from hypothesis import HealthCheck, settings
-from schemathesis.checks import CHECKS, load_all_checks
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.database import Base, get_db
@@ -52,14 +51,6 @@ def _contract_database():
 
 schema = schemathesis.openapi.from_asgi("/openapi.json", app)
 
-load_all_checks()
-# `/processos/sync` (POST) e `/processos/{process_id}` (GET) compartilham o
-# mesmo prefixo de caminho. Um GET em "/processos/sync" é roteado pelo
-# Starlette para o endpoint parametrizado (process_id="sync"), retornando 422
-# em vez do 405 que o check `unsupported_method` esperaria. É uma
-# característica aceita do design atual da API, não um bug de contrato.
-_EXCLUDED_CHECKS = CHECKS.get_by_names(["unsupported_method"])
-
 
 @schema.parametrize()
 @settings(
@@ -73,4 +64,4 @@ def test_api_respects_openapi_contract(case):
     respeita o contrato: status codes documentados, schema de resposta
     e ausência de erros de servidor (5xx) não documentados.
     """
-    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
+    case.call_and_validate()

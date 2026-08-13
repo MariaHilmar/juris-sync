@@ -3,7 +3,7 @@
 [![CI](https://github.com/MariaHilmar/juris-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/MariaHilmar/juris-sync/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)
-![Coverage](https://img.shields.io/badge/coverage-89%25-brightgreen.svg)
+![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen.svg)
 
 API REST assíncrona para **monitoramento, ingestão e jurimetria** de processos judiciais, integrada à [API Pública do DataJud (CNJ)](https://datajud-wiki.cnj.jus.br/api-publica/).
 
@@ -56,10 +56,11 @@ Guia completo para testadores: [juris-sync-web/docs/guia-do-testador.md](https:/
 - **FastAPI + SQLAlchemy 2.0 async** - I/O não bloqueante com `asyncpg` / `aiosqlite`
 - **Motor DataJud** - integração real com API do CNJ + mock determinístico para desenvolvimento sem credenciais
 - **Sincronização idempotente** - evita duplicar processos e movimentações
-- **RAG em memória** - normalização de classe, assunto e tribunal antes da validação Pydantic
+- **Enriquecimento por glossário** - normaliza classe, assunto e tribunal em memória (não é RAG de produção)
 - **Alembic** - versionamento de schema (`processos`, `movimentacoes`)
 - **Structlog** - logs legíveis em dev, JSON em produção
-- **43 testes em 5 camadas** - unitário, API (ASGI), mock HTTP (`respx`), reconciliação de sync, integração (Testcontainers) e contrato OpenAPI (Schemathesis) - cobertura ≥ 85%
+- **Testes em 5 camadas** - unitário, API (ASGI), mock HTTP (`respx`), reconciliação de sync, integração (Testcontainers) e contrato OpenAPI (Schemathesis) - cobertura ≥ 85%
+- **ADRs** - decisões de mock, idempotência, pirâmide de testes e enrichment em [`docs/adr/`](docs/adr/)
 - **Documentação de requisitos** - regras de negócio, histórias de usuário, cenários BDD e rastreabilidade requisito → código → teste em [`docs/requisitos.md`](docs/requisitos.md)
 - **GitHub Actions** - lint (Ruff, Black, Mypy) + testes (unitário + integração + contrato) em cada push/PR
 
@@ -75,7 +76,7 @@ graph TD
     Service --> ClientDJ[DataJudClient]
     ClientDJ -->|HTTPS + APIKey| DataJud[API Pública CNJ]
     ClientDJ -.->|fallback| Mock[Mock determinístico]
-    Service --> RAG[DataJudRAGEnricher]
+    Service --> Enrich[DataJudEnricher]
     Service --> DB[(PostgreSQL / SQLite)]
 ```
 
@@ -107,7 +108,7 @@ Em desenvolvimento, `BACKEND_CORS_ORIGINS=*` (padrão) já permite o frontend. E
 ### Fluxo de sincronização
 
 1. **Extração** - `DataJudClient` consulta o tribunal correto (`api_publica_{alias}/_search`) ou gera mock a partir do CNJ
-2. **Enriquecimento** - RAG recupera contexto jurídico e normaliza campos
+2. **Enriquecimento** - glossário local canonicaliza classe, assunto e tribunal
 3. **Validação** - Pydantic v2 valida formato CNJ e tipos
 4. **Persistência** - upsert do processo + inserção apenas de movimentações novas
 
@@ -247,12 +248,12 @@ alembic upgrade head
 
 ## 🧪 Testes Automatizados
 
-![Tests](https://img.shields.io/badge/tests-43%20passing-brightgreen.svg)
-![Coverage](https://img.shields.io/badge/coverage-89.9%25-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-44%20passing-brightgreen.svg)
+![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen.svg)
 
-O projeto conta com **43 testes automatizados** organizados em 5 camadas, cobrindo desde regras de negócio isoladas até fuzzing de contrato OpenAPI e integração com PostgreSQL real.
+O projeto conta com uma suíte em **5 camadas** (44+ testes na suíte padrão), cobrindo desde regras de negócio isoladas até fuzzing de contrato OpenAPI e integração com PostgreSQL real.
 
-- **Testes unitários** - validam o comportamento isolado de `sync_service`, `datajud_client`, RAG e schemas Pydantic.
+- **Testes unitários** - validam o comportamento isolado de `sync_service`, `datajud_client`, enrichment e schemas Pydantic.
 - **Testes de API** - disparam requisições HTTP reais (via `httpx.AsyncClient` + `ASGITransport`) contra os endpoints FastAPI, com banco SQLite em memória isolado por teste.
 - **Mock de API externa** - intercepta a camada HTTP real com `respx`, validando o contrato exato da chamada ao DataJud (headers, payload) e os cenários de fallback (404, 500, timeout).
 - **Reconciliação de sincronização** - garante fidelidade dos dados persistidos vs. fonte externa, atomicidade em falhas parciais e ausência de movimentações órfãs.
@@ -309,7 +310,7 @@ tests/test_api.py::test_api_detail_returns_404_for_not_found PASSED      [ 15%]
 tests/test_api.py::test_api_jurimetria_stats_endpoints PASSED            [ 18%]
 tests/test_datajud_client.py::test_mock_client_generates_consistent_data PASSED [ 21%]
 tests/test_datajud_client_contract.py::test_fetch_from_api_sends_expected_request_contract PASSED [ 46%]
-tests/test_rag_enricher.py::test_rag_enricher_retrieves_context_and_normalizes_fields PASSED [ 59%]
+tests/test_enricher.py::test_enricher_retrieves_context_and_normalizes_fields PASSED [ 59%]
 tests/test_sync_reconciliation.py::test_reconciliation_rolls_back_completely_on_partial_failure PASSED [ 84%]
 tests/test_sync_service.py::test_sync_new_movement_adds_only_the_new_one PASSED [100%]
 
@@ -375,7 +376,7 @@ juris-sync/
 │   ├── core/          # Config, database, logging
 │   ├── models/        # ORM SQLAlchemy
 │   ├── schemas/       # Pydantic
-│   ├── services/      # DataJud, sync, RAG
+│   ├── services/      # DataJud, sync, enrichment
 │   └── main.py
 ├── alembic/           # Migrações
 ├── tests/             # Pytest (unitário, mock, reconciliação, integração, contrato)
