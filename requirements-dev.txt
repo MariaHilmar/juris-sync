@@ -1,15 +1,15 @@
 -r requirements.txt
-pytest>=8.1.0
-pytest-asyncio>=0.23.5
+pytest>=9.1.1
+pytest-asyncio>=1.4.0
 pytest-cov>=7.1.0
 pytest-watch>=4.2.0
-factory-boy>=3.3.0
-black>=24.2.0
-ruff>=0.3.0
-mypy>=1.11.0
+factory-boy>=3.3.3
+black>=26.5.1
+ruff>=0.16.2
+mypy>=2.3.0
 
 # Mock de API externa (contrato HTTP do DataJud)
-respx>=0.21.1
+respx>=0.23.1
 
 # Testes de integração com PostgreSQL real via Docker
 testcontainers[postgres]>=4.15.0
