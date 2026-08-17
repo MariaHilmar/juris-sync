@@ -5,7 +5,7 @@ pytest-cov>=7.1.0
 pytest-watch>=4.2.0
 factory-boy>=3.3.3
 black>=26.5.1
-ruff>=0.16.2
+ruff>=0.16.3
 mypy>=2.3.0
 
 # Mock de API externa (contrato HTTP do DataJud)
