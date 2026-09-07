@@ -5,8 +5,8 @@ pytest-cov>=7.1.0
 pytest-watch>=4.2.0
 factory-boy>=3.3.3
 black>=26.5.1
-ruff>=0.16.2
-mypy>=2.3.0
+ruff>=0.16.6
+mypy>=2.3.1
 
 # Mock de API externa (contrato HTTP do DataJud)
 respx>=0.23.1
@@ -16,4 +16,4 @@ testcontainers[postgres]>=4.15.0
 psycopg2-binary>=2.9.12
 
 # Contract testing do schema OpenAPI
-schemathesis>=4.24.3
+schemathesis>=4.25.2
