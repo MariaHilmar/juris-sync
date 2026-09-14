@@ -1,9 +1,9 @@
 fastapi>=0.141.1
-uvicorn[standard]>=0.52.1
-pydantic[email]>=2.13.4
+uvicorn[standard]>=0.52.4
+pydantic[email]>=2.13.5
 pydantic-settings>=2.15.0
-sqlalchemy[asyncio]>=2.0.51
-alembic>=1.19.1
+sqlalchemy[asyncio]>=2.0.52
+alembic>=1.19.2
 asyncpg>=0.31.0
 aiosqlite>=0.22.1
 structlog>=26.1.0
